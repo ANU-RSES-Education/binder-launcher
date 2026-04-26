@@ -1,12 +1,13 @@
 name: Build Binder image
 
 # Builds container/Dockerfile.source and publishes it to
-# ghcr.io/anu-rses-education/emsc-2022:latest.
+# ghcr.io/anu-rses-education/binder-launcher:latest. Binder reads
+# this repo's .binder/Dockerfile (one-line `FROM` on this image) so
+# mybinder.org pulls a pre-built image rather than building anything
+# locally on its overloaded shared infra.
 #
-# This image is the shared ANU-RSES Binder runtime — it is course-neutral.
-# Image name `emsc-2022` is historical (it was first built for that course);
-# leaving as-is for now to avoid a public-visibility flip on a renamed
-# package. Worth a deliberate rename pass eventually.
+# Image name follows the launcher repo so the auto-issued
+# GITHUB_TOKEN can publish without manual cross-repo access grants.
 
 on:
   push:
@@ -41,15 +42,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Compute lowercase image name
+        id: img
+        # `${GITHUB_REPOSITORY,,}` lower-cases owner/repo. So this image is
+        # automatically `ghcr.io/anu-rses-education/binder-launcher` — i.e.,
+        # the GHCR package "owned" by this repo, which GITHUB_TOKEN can
+        # always write to without manual access-grant steps.
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata (tags)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          # Hardcoded image name for transition continuity — see header note.
-          # When renaming the image, change this and the launcher's
-          # .binder/Dockerfile FROM line in the same commit, then flip
-          # public visibility on the new GHCR package.
-          images: ghcr.io/anu-rses-education/emsc-2022
+          images: ${{ steps.img.outputs.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
