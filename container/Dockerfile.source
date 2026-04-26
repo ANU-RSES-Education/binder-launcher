@@ -1,0 +1,84 @@
+# Source Dockerfile for the shared ANU-RSES Binder image — NOT read by
+# Binder directly.
+#
+# Built by .github/workflows/build-binder-image.yml in this repo and
+# pushed to `ghcr.io/anu-rses-education/emsc-2022:latest`. (Image name
+# is historical; the contents are course-neutral. Worth a separate
+# rename pass eventually.)
+#
+# .binder/Dockerfile in this repo just does `FROM` on the published
+# image, so mybinder.org launches pull a pre-built image rather than
+# building anything locally on its overloaded shared infra.
+
+FROM docker.io/mambaorg/micromamba:2.3.0
+
+LABEL org.opencontainers.image.source="https://github.com/ANU-RSES-Education/binder-launcher"
+LABEL org.opencontainers.image.description="Shared ANU-RSES Binder runtime: scientific Python, mapping, pyvista, nbgitpuller"
+LABEL org.opencontainers.image.licenses="MIT"
+
+# --- system packages ---
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      git \
+      libgl1 \
+      libglu1-mesa \
+      libosmesa6 \
+      libglx-mesa0 \
+      libxft2 libxinerama1 libxcursor1 libxrender1 libxext6 \
+      libglib2.0-0 \
+      libfreetype6 \
+      xvfb \
+ && rm -rf /var/lib/apt/lists/*
+
+# --- Quarto CLI (cheap dpkg) ---
+ARG QUARTO_VERSION=1.4.550
+RUN curl -fsSL -o /tmp/quarto.deb \
+      "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUARTO_VERSION}/quarto-${QUARTO_VERSION}-linux-amd64.deb" \
+ && dpkg -i /tmp/quarto.deb \
+ && rm /tmp/quarto.deb
+
+# --- create the jovyan user that Binder expects (UID 1000) ---
+# micromamba's default user (mambauser) is already UID 57439. We want UID 1000.
+RUN userdel -r mambauser 2>/dev/null || true \
+ && groupadd -g 1000 jovyan \
+ && useradd -m -s /bin/bash -u 1000 -g 1000 jovyan \
+ && mkdir -p /home/jovyan \
+ && chown jovyan:jovyan /home/jovyan
+
+USER jovyan
+WORKDIR /home/jovyan
+ENV HOME=/home/jovyan \
+    MAMBA_ROOT_PREFIX=/home/jovyan/micromamba \
+    PATH=/home/jovyan/micromamba/bin:$PATH
+
+# --- conda env: scientific stack + jupyter ---
+# Build context is `container/` (set in build-binder-image.yml), so this
+# path is relative to container/, not to the repo root.
+COPY --chown=jovyan:jovyan environment.yml /tmp/env.yml
+RUN micromamba install -y -n base -f /tmp/env.yml \
+ && micromamba clean --all --yes \
+ && rm /tmp/env.yml
+
+ARG MAMBA_DOCKERFILE_ACTIVATE=1
+
+# --- sanity-import at build time: broken install fails CI, not Binder ---
+RUN python -c "import numpy, scipy, pandas, obspy, pyvista, h5py, sympy, jupyterlab; print('imports OK')"
+
+# --- PyVista / Mesa headless rendering ---
+ENV PYVISTA_OFF_SCREEN=true \
+    PYVISTA_USE_IPYVTK=true \
+    DISPLAY=:99 \
+    LIBGL_ALWAYS_SOFTWARE=1 \
+    MESA_GL_VERSION_OVERRIDE=3.3 \
+    GALLIUM_DRIVER=llvmpipe \
+    VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow
+
+# --- Binder env vars ---
+ENV NB_USER=jovyan \
+    NB_UID=1000
+
+EXPOSE 8888
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--no-browser"]
