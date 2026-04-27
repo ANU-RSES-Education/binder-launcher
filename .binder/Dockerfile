@@ -7,4 +7,4 @@
 # README), so this image and this launcher repo never need to be rebuilt
 # when a course's notebooks change.
 
-FROM ghcr.io/anu-rses-education/emsc-2022:latest
+FROM ghcr.io/anu-rses-education/binder-launcher:latest
